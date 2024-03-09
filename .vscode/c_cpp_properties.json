@@ -4,7 +4,10 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/src/**",
-                "${workspaceFolder}/build/third-party/vulkanHeadersEP-prefix/src/vulkanHeadersEP/include"
+                "${workspaceFolder}/build/third-party/vulkanHeadersEP-prefix/src/vulkanHeadersEP/include",
+                "${workspaceFolder}/src/app/app-common/Tab/include",
+                "${workspaceFolder}/src/app/app-common/include",
+                "${workspaceFolder}/build/src/app/app-winui3/Generated Files"
             ],
             "defines": [
                 "_DEBUG",

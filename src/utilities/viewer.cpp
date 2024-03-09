@@ -169,11 +169,11 @@ class TestViewerWindow final : private D3D11Resources {
   static constexpr auto FillModeCount
     = static_cast<std::underlying_type_t<FillMode>>(LastFillMode) + 1;
 
-  FillMode mFillMode {FillMode::Default};
+  FillMode mFillMode {FillMode::ColorKey};
 
   bool mShowVR {false};
 
-  bool mStreamerMode {false};
+  bool mStreamerMode {true};
   FillMode mStreamerModePreviousFillMode;
 
   PixelSize mSwapChainSize;
@@ -224,8 +224,10 @@ class TestViewerWindow final : private D3D11Resources {
       WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT,
       CW_USEDEFAULT,
-      768 / 2,
-      1024 / 2,
+      720,
+      1024,
+      // 768 / 2,
+      // 1024 / 2,
       NULL,
       NULL,
       instance,
