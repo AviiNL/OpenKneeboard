@@ -3,6 +3,7 @@ ok_add_library(
   STATIC
   DCSWorld.cpp
   DCSWorldInstance.cpp
+  FalconBMS.cpp
   Game.cpp
   GenericGame.cpp
   GameInstance.cpp

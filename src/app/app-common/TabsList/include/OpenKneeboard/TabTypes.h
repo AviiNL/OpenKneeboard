@@ -19,6 +19,7 @@
  */
 #pragma once
 
+#include <OpenKneeboard/BMSRadioLogTab.h>
 #include <OpenKneeboard/BrowserTab.h>
 #include <OpenKneeboard/DCSAircraftTab.h>
 #include <OpenKneeboard/DCSBriefingTab.h>
@@ -42,6 +43,7 @@
   IT(_("Endless Notebook (from template file)"), EndlessNotebook) \
   IT(_("Window Capture"), WindowCapture) \
   IT(_("Web Dashboard"), Browser) \
+  IT(_("BMS Radio Log"), BMSRadioLog) \
   IT(_("DCS Aircraft Kneeboard"), DCSAircraft) \
   IT(_("DCS Mission Briefing"), DCSBriefing) \
   IT(_("DCS Mission Kneeboard"), DCSMission) \
