@@ -52,9 +52,6 @@ BMSRadioLogTab::BMSRadioLogTab(
     = FilteredLastModifiedFilePageSource::Create(dxr, kbs, filter, path);
 
   this->SetDelegates({mPageSource});
-
-  // AddEventListener(mPageSource->evPageAppendedEvent,
-  // this->evPageAppendedEvent);
 }
 
 BMSRadioLogTab::~BMSRadioLogTab() {
@@ -74,29 +71,6 @@ PageIndex BMSRadioLogTab::GetPageCount() const {
   // We display a placeholder message
   return count == 0 ? 1 : count;
 }
-
-// void BMSRadioLogTab::OnFileModified(const std::filesystem::path& logs) {
-//   std::map<time_t, std::filesystem::directory_entry> sort_by_time;
-
-//   for (const auto& entry: std::filesystem::directory_iterator(logs)) {
-//     if (
-//       entry.is_regular_file()
-//       && entry.path().filename().string().starts_with("RadioSubtitles-")) {
-//       auto time = to_time_t(entry.last_write_time());
-//       sort_by_time[time] = entry;
-//     }
-//   }
-
-//   if (sort_by_time.empty()) {
-//     return;
-//   }
-
-//   auto& entry = sort_by_time.rbegin()->second;
-
-//   mPageSource->PushMessage(entry.path().string());
-
-//   this->evContentChangedEvent.Emit();
-// }
 
 void BMSRadioLogTab::Reload() {
   mPageSource->Reload();
