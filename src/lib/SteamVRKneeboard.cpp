@@ -48,22 +48,19 @@ namespace OpenKneeboard {
 
 SteamVRKneeboard::SteamVRKneeboard() {
   OPENKNEEBOARD_TraceLoggingScope("SteamVRKneeboard::SteamVRKneeboard()");
+  auto d3d = mDXR.mD3D11Device.get();
   {
-    // Use DXResources to share the GPU selection logic
-    D3D11Resources d3d;
-    mD3D = d3d.mD3D11Device;
-    mD3DImmediateContext = d3d.mD3D11ImmediateContext;
-    mSHM.InitializeCache(mD3D.get(), /* swapchainLength = */ 2);
+    mSHM.InitializeCache(d3d, /* swapchainLength = */ 2);
     DXGI_ADAPTER_DESC desc;
-    d3d.mDXGIAdapter->GetDesc(&desc);
+    mDXR.mDXGIAdapter->GetDesc(&desc);
     dprintf(
       L"SteamVR client running on adapter '{}' (LUID {:#x})",
       desc.Description,
-      d3d.mAdapterLUID);
-
-    mDXGIFactory = d3d.mDXGIFactory;
-    mAdapterLuid = d3d.mAdapterLUID;
+      mDXR.mAdapterLUID);
   }
+
+  winrt::check_hresult(
+    d3d->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_PPV_ARGS(mFence.put())));
 
   D3D11_TEXTURE2D_DESC desc {
     .Width = MaxViewRenderSize.mWidth,
@@ -74,14 +71,14 @@ SteamVRKneeboard::SteamVRKneeboard() {
     .SampleDesc = {1, 0},
     .BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET,
   };
-  check_hresult(mD3D->CreateTexture2D(&desc, nullptr, mBufferTexture.put()));
+  check_hresult(d3d->CreateTexture2D(&desc, nullptr, mBufferTexture.put()));
 
   desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
   desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
   for (uint8_t i = 0; i < MaxViewCount; ++i) {
     auto& layer = mLayers.at(i);
     check_hresult(
-      mD3D->CreateTexture2D(&desc, nullptr, layer.mOpenVRTexture.put()));
+      d3d->CreateTexture2D(&desc, nullptr, layer.mOpenVRTexture.put()));
     check_hresult(layer.mOpenVRTexture.as<IDXGIResource>()->GetSharedHandle(
       &layer.mSharedHandle));
   }
@@ -91,10 +88,10 @@ SteamVRKneeboard::SteamVRKneeboard() {
     .ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D,
     .Texture2D = {.MipSlice = 0},
   };
-  check_hresult(mD3D->CreateRenderTargetView(
+  check_hresult(d3d->CreateRenderTargetView(
     mBufferTexture.get(), &rtvd, mRenderTargetView.put()));
 
-  mSpriteBatch = std::make_unique<D3D11::SpriteBatch>(mD3D.get());
+  mSpriteBatch = std::make_unique<D3D11::SpriteBatch>(d3d);
 }
 
 SteamVRKneeboard::~SteamVRKneeboard() {
@@ -159,18 +156,18 @@ bool SteamVRKneeboard::InitializeOpenVR() {
     uint64_t luid {};
     mIVRSystem->GetOutputDevice(&luid, vr::ETextureType::TextureType_DirectX);
     winrt::com_ptr<IDXGIAdapter> adapter;
-    winrt::check_hresult(mDXGIFactory->EnumAdapterByLuid(
+    winrt::check_hresult(mDXR.mDXGIFactory->EnumAdapterByLuid(
       std::bit_cast<LUID>(luid), IID_PPV_ARGS(adapter.put())));
     DXGI_ADAPTER_DESC desc;
     winrt::check_hresult(adapter->GetDesc(&desc));
 
     dprintf(
       L"OpenVR requested adapter '{}' (LUID {:#x})", desc.Description, luid);
-    if (luid != mAdapterLuid) {
+    if (luid != mDXR.mAdapterLUID) {
       dprintf(
         "WARNING: SteamVR adapter {:#x} != OKB adapter {:#x}",
         luid,
-        mAdapterLuid);
+        mDXR.mAdapterLUID);
     }
   }
 
@@ -243,6 +240,10 @@ void SteamVRKneeboard::Tick() {
     return;
   }
 
+  auto ctx = mDXR.mD3D11ImmediateContext.get();
+  std::unordered_map<uint8_t, RenderParameters> layerRenderParams;
+  std::vector<uint8_t> activeLayers;
+
   const auto layerCount = snapshot.GetLayerCount();
   for (uint8_t layerIndex = 0; layerIndex < layerCount; ++layerIndex) {
     this->InitializeLayer(layerIndex);
@@ -258,24 +259,8 @@ void SteamVRKneeboard::Tick() {
     if (renderParams.mCacheKey == layerState.mCacheKey) {
       continue;
     }
-    OVERLAY_CHECK(
-      SetOverlayWidthInMeters,
-      layerState.mOverlay,
-      renderParams.mKneeboardSize.x);
-
-    // Transpose to fit OpenVR's in-memory layout
-    // clang-format off
-    const auto transform = (
-      Matrix::CreateFromQuaternion(renderParams.mKneeboardPose.mOrientation)
-      * Matrix::CreateTranslation(renderParams.mKneeboardPose.mPosition)
-    ).Transpose();
-    // clang-format on
-
-    OVERLAY_CHECK(
-      SetOverlayTransformAbsolute,
-      layerState.mOverlay,
-      vr::TrackingUniverseStanding,
-      reinterpret_cast<const vr::HmdMatrix34_t*>(&transform));
+    layerRenderParams.emplace(layerIndex, renderParams);
+    activeLayers.push_back(layerIndex);
 
     // Copy the texture as for interoperability with other systems
     // (e.g. DirectX12) we use SHARED_NTHANDLE, but SteamVR doesn't
@@ -286,7 +271,6 @@ void SteamVRKneeboard::Tick() {
     // OpenVR call
 
     // non-atomic paint to buffer...
-    auto ctx = mD3DImmediateContext.get();
     ctx->ClearRenderTargetView(
       mRenderTargetView.get(), DirectX::Colors::Transparent);
 
@@ -320,28 +304,58 @@ void SteamVRKneeboard::Tick() {
       mBufferTexture.get(),
       0,
       &sourceBox);
-    layerState.mTextureCacheKey = snapshot.GetRenderCacheKey();
 
-    // SteamVR has no synchronization support, so an explicit flush is needed.
+    layerState.mFenceValue = ++mFenceValue;
+    winrt::check_hresult(ctx->Signal(mFence.get(), layerState.mFenceValue));
+  }
+
+  for (const auto& layerIndex: activeLayers) {
+    const auto& layer = *snapshot.GetLayerConfig(layerIndex);
+    auto& layerState = mLayers.at(layerIndex);
+    const auto& renderParams = layerRenderParams.at(layerIndex);
+
+    // SteamVR has no synchronization support, so an explicit CPU/GPU sync is
+    // needed.
     //
     // If you remove this, test that SteamVR updates when changing tabs/pages
     // when there are not regular page dirty events. For example:
     // - disable/hide the clock/footer
     // - remove any window capture or webview2 tabs
-    ctx->Flush1(D3D11_CONTEXT_TYPE_3D, mGPUFlushEvent.get());
+    winrt::check_hresult(mFence->SetEventOnCompletion(
+      layerState.mFenceValue, mGPUFlushEvent.get()));
     {
       const auto result = WaitForSingleObject(mGPUFlushEvent.get(), INFINITE);
       if (result != WAIT_OBJECT_0) {
         const auto error = GetLastError();
         TraceLoggingWrite(
           gTraceProvider,
-          "SteamVRKneeboard/Flush1()",
+          "SteamVRKneeboard/WaitForFence",
           TraceLoggingValue(result, "Result"),
           TraceLoggingValue(error, "Error"));
         OPENKNEEBOARD_BREAK;
       }
     }
 
+    OVERLAY_CHECK(
+      SetOverlayWidthInMeters,
+      layerState.mOverlay,
+      renderParams.mKneeboardSize.x);
+
+    // Transpose to fit OpenVR's in-memory layout
+    // clang-format off
+    const auto transform = (
+      Matrix::CreateFromQuaternion(renderParams.mKneeboardPose.mOrientation)
+      * Matrix::CreateTranslation(renderParams.mKneeboardPose.mPosition)
+    ).Transpose();
+    // clang-format on
+
+    OVERLAY_CHECK(
+      SetOverlayTransformAbsolute,
+      layerState.mOverlay,
+      vr::TrackingUniverseStanding,
+      reinterpret_cast<const vr::HmdMatrix34_t*>(&transform));
+
+    const auto& imageSize = layer.mVR.mLocationOnTexture.mSize;
     vr::VRTextureBounds_t textureBounds {
       0.0f,
       0.0f,
@@ -456,11 +470,6 @@ winrt::Windows::Foundation::IAsyncAction SteamVRKneeboard::Run(
   std::stop_token stopToken) {
   if (!vr::VR_IsRuntimeInstalled()) {
     dprint("Stopping OpenVR support, no runtime installed.");
-    co_return;
-  }
-
-  if (!mD3D) {
-    dprint("Stopping OpenVR support, failed to get D3D11 device");
     co_return;
   }
 
