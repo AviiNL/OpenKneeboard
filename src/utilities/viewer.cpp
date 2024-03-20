@@ -168,7 +168,7 @@ class TestViewerWindow final : private D3D11Resources {
 
   bool mShowVR {false};
 
-  FillMode mStreamerModePreviousFillMode;
+  FillMode mStreamerModePreviousFillMode {FillMode::Default};
 
   PixelSize mSwapChainSize;
   winrt::com_ptr<IDXGISwapChain1> mSwapChain;
@@ -606,6 +606,7 @@ class TestViewerWindow final : private D3D11Resources {
           (static_cast<std::underlying_type_t<FillMode>>(mSettings.mFillMode)
            + 1)
           % FillModeCount);
+        mSettings.Save();
         this->PaintNow();
         return;
       // Streamer
@@ -617,6 +618,7 @@ class TestViewerWindow final : private D3D11Resources {
         } else if (mSettings.mFillMode == FillMode::ColorKey) {
           mSettings.mFillMode = mStreamerModePreviousFillMode;
         }
+        mSettings.Save();
         this->PaintNow();
         return;
       // VR
